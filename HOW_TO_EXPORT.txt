@@ -1,0 +1,33 @@
+=======================================================
+HOW TO EXPORT ROBLOX SCRIPTS TO ROJO (NEW SYSTEM)
+=======================================================
+
+This new system bypasses third-party parsers and uses Roblox Studio itself to export your code safely and reliably.
+
+--- STEP 1: START THE SERVER ---
+1. Inside this "Input" folder, double-click the "Start_Export_Server.cmd" file.
+2. A black command prompt window will open and say "Waiting for Roblox Studio to send data...".
+3. Keep this black window open in the background!
+
+--- STEP 2: RUN THE COMMAND IN STUDIO ---
+1. Open the "ConsoleCommand.lua" file in this folder using any text editor (like Notepad or VS Code) and COPY all the code inside it.
+2. Open your game in Roblox Studio.
+3. At the very top of Roblox Studio, go to the "View" tab.
+4. Click the "Command Bar" button. A small, single-line text box will appear at the very bottom of your screen.
+5. Paste all the code you copied into that Command Bar and press Enter on your keyboard.
+
+--- STEP 3: FINISH ---
+1. You will instantly see your black server window light up and list all the files it is saving.
+2. When the Roblox Studio Output window says "✅ Export complete!", the process is done!
+3. You can safely close the black server window. All your perfectly formatted files are now sitting in the "Export_FTT" folder!
+
+
+=======================================================
+EXTRA TIPS & TRICKS
+=======================================================
+
+1. AUTOMATIC SKIPPING OF MASSIVE FILES
+Roblox blocks HTTP requests larger than 1 Megabyte. If you have a massive auto-generated database script (larger than 500 KB), the script will automatically skip it, print a yellow warning in your Studio Output window letting you know, and continue exporting the rest of your game without crashing.
+
+2. HOW TO MANUALLY IGNORE FILES/FOLDERS
+If there are certain scripts or folders you never want to export, simply add "_?" anywhere in their name inside Roblox Studio (for example, rename "Logger" to "Logger_?"). The server will see this tag, automatically ignore it, and skip saving it to your computer!
