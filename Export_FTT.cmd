@@ -1,2 +1,2 @@
-remodel run exportAeroProject.lua FTT FTT_TEST
+remodel run exportAeroProject.lua FTT ..\Export_FTT
 pause
