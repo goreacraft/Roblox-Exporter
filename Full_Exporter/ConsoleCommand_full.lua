@@ -108,7 +108,7 @@ local function walk(instance, ancestors, rootName)
 	end
 
 	for _, child in ipairs(instance:GetChildren()) do
-		if walk(child, segments, rootName) then
+		if walk(child, append(ancestors, instance.Name), rootName) then
 			containsScripts = true
 		end
 	end
