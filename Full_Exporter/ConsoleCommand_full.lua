@@ -22,16 +22,11 @@ local function shouldExcludeName(name)
 end
 
 local function validSegment(name)
-	if name == "" or name == "." or name == ".." then
-		return false, "empty or relative path segment"
+	if name == "" then
+		return false, "empty Roblox instance name"
 	end
-	if string.find(name, '[<>:"/\\|?*]') or string.match(name, "[%. ]$") then
-		return false, "Windows-incompatible name"
-	end
-	local upper = string.upper(string.gsub(name, "%..*$", ""))
-	if upper == "CON" or upper == "PRN" or upper == "AUX" or upper == "NUL"
-		or string.match(upper, "^COM[1-9]$") or string.match(upper, "^LPT[1-9]$") then
-		return false, "reserved Windows name"
+	if string.sub(name, 1, 1) == "$" then
+		return false, "Rojo reserves instance-description keys beginning with $"
 	end
 	return true
 end
@@ -63,12 +58,14 @@ local function withRoot(rootName, segments)
 end
 
 local function pathKey(segments)
+	local parts = {}
 	for i, segment in ipairs(segments) do
 		if type(segment) ~= "string" then
 			error(string.format("Invalid path segment %d (%s): %s", i, typeof(segment), tostring(segment)))
 		end
+		parts[#parts + 1] = tostring(#segment) .. ":" .. segment
 	end
-	return table.concat(segments, "/")
+	return table.concat(parts, "|")
 end
 
 local function safeUtf8End(source, startIndex, maxBytes)

@@ -4,13 +4,17 @@ Purpose
 -------
 Export every saved Script, LocalScript, and ModuleScript in the open Studio place,
 recursively across all saved top-level services. Scripts inside Models, Parts, and
-other instances keep their Studio ancestry through generated Rojo class anchors.
+other instances keep their Studio ancestry through the generated Rojo project tree.
 The result is a script overlay suitable for source control and Rojo live sync.
+
+Script files use stable hashed filenames under src/scripts. The generated Rojo
+project file describes the original Roblox hierarchy and names explicitly, so
+names containing filesystem-reserved characters (such as colons) are retained.
 
 This does not export terrain, geometry, models' properties, meshes, or other assets.
 Keep the Roblox place as the source of truth for those. In Rojo, the generated
-class anchors and $ignoreUnknownInstances:false are intended to keep untracked
-Studio children in anchored models while syncing tracked scripts.
+project hierarchy and $ignoreUnknownInstances:false settings are intended to keep
+untracked Studio children in mapped instances while syncing tracked scripts.
 
 Excluded by design
 ------------------
@@ -37,11 +41,12 @@ How to export
 
 Generated layout
 ----------------
-The receiver creates default.project.json and src/ only after all discovered
-scripts arrive successfully. Script source files are represented as
-init.server.lua, init.client.lua, or init.lua. Non-folder ancestors that contain
-scripts receive init.meta.json className anchors, preserving their instance type
-without trying to recreate geometry or arbitrary properties.
+The receiver creates default.project.json and src/scripts/ only after all
+discovered scripts arrive successfully. Every script is stored as a stable hashed
+source file, and the project tree maps that file back to its original script name,
+class, and parent path. Ancestors are represented in the project tree with their
+class names and ignoreUnknownInstances:false; geometry and other properties are
+not reconstructed.
 
 Rojo limitations and safe use
 -----------------------------

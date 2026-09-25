@@ -8,6 +8,8 @@ local logPath = "server_log_full.txt"
 local pendingScripts = {}
 local exportedScripts = {}
 local exportedAnchors = {}
+local treeRoots = {}
+local scriptFileOwners = {}
 local exportFailures = {}
 local roots = {}
 local expectedScripts = 0
@@ -26,52 +28,62 @@ local function ensureDir(path)
 	if not fs.isDir(path) then fs.writeDir(path) end
 end
 
-local function validateSegments(segments)
-	if type(segments) ~= "table" or #segments < 2 or segments[1] ~= "src" then
-		return false, "path must start with src and include a service"
-	end
-	for _, segment in ipairs(segments) do
-		if type(segment) ~= "string" or segment == "" or segment == "." or segment == ".." then
-			return false, "empty or relative path segment"
-		end
-		if segment:find('[<>:"/\\|?*]') or segment:match("[.]$") then
-			return false, "path contains a Windows-incompatible name: " .. segment
-		end
-		local upper = segment:upper():gsub("%..*$", "")
-		if upper == "CON" or upper == "PRN" or upper == "AUX" or upper == "NUL"
-			or upper:match("^COM[1-9]$") or upper:match("^LPT[1-9]$") then
-			return false, "path contains a reserved Windows name: " .. segment
-		end
-	end
-	return true
-end
-
 local function pathFor(segments)
 	return table.concat(segments, "/")
 end
 
-local function makeParentDirectories(segments)
-	local current = outputDir
+local function pathKey(segments)
+	local parts = {}
 	for _, segment in ipairs(segments) do
-		current = current .. "/" .. segment
-		ensureDir(current)
+		parts[#parts + 1] = tostring(#segment) .. ":" .. segment
 	end
-	return current
+	return table.concat(parts, "|")
+end
+
+
+local function scriptFilePath(segments, className)
+	local key = pathKey(segments)
+	local hash = 2166136261
+	for i = 1, #key do
+		hash = (hash * 31 + string.byte(key, i)) % 4294967296
+	end
+	local ext = className == "Script" and ".server.lua"
+		or className == "LocalScript" and ".client.lua"
+		or ".lua"
+	local filename = string.format("src/scripts/%08x%s", hash, ext)
+	local previous = scriptFileOwners[filename]
+	if previous and previous ~= key then
+		return nil, "script source path hash collision between " .. previous .. " and " .. key
+	end
+	scriptFileOwners[filename] = key
+	return filename
+end
+
+local function ensureTreeNode(segments, className)
+	local rootName = segments[2]
+	local node = treeRoots[rootName]
+	if not node then
+		node = { className = nil, children = {} }
+		treeRoots[rootName] = node
+	end
+	for i = 3, #segments do
+		local name = segments[i]
+		local child = node.children[name]
+		if not child then
+			child = { className = "Folder", children = {} }
+			node.children[name] = child
+		end
+		node = child
+	end
+	if className then node.className = className end
+	return node
 end
 
 local function writeAnchor(item)
-	local ok, reason = validateSegments(item.segments)
-	if not ok then
-		log("ERROR: rejected anchor " .. tostring(pathFor(item.segments)) .. ": " .. reason)
-		return false
-	end
-	local dir = makeParentDirectories(item.segments)
-	fs.writeFile(dir .. "/init.meta.json", serde.encode("json", {
-		className = item.className,
-		ignoreUnknownInstances = false,
-	}))
-	exportedAnchors[pathFor(item.segments)] = item.className
-	return true
+	local node = ensureTreeNode(item.segments, item.className)
+	local key = pathKey(item.segments)
+	exportedAnchors[key] = { path = pathFor(item.segments), segments = item.segments, className = item.className }
+	return node ~= nil
 end
 
 local function scriptExtension(className)
@@ -88,26 +100,23 @@ local function finishScript(key, pending)
 		log("ERROR: unsupported LuaSourceContainer class " .. tostring(item.className) .. " at " .. key)
 		return false
 	end
-	local ok, reason = validateSegments(item.segments)
-	if not ok then
-		log("ERROR: rejected script " .. key .. ": " .. reason)
-		return false
-	end
-	local dir = makeParentDirectories(item.segments)
-	local filename = "init.lua"
-	if ext == "server" then filename = "init.server.lua" end
-	if ext == "client" then filename = "init.client.lua" end
-	fs.writeFile(dir .. "/" .. filename, table.concat(pending.chunks))
 	local properties = {}
 	if item.disabled then properties.Disabled = true end
 	if item.runContext and item.runContext ~= "Legacy" then properties.RunContext = item.runContext end
-	if next(properties) then
-		fs.writeFile(dir .. "/init.meta.json", serde.encode("json", {
-			className = item.className,
-			properties = properties,
-		}))
+	local filePath, pathError = scriptFilePath(item.segments, item.className)
+	if not filePath then
+		log("ERROR: " .. pathError)
+		return false
 	end
+	ensureDir(outputDir .. "/src/scripts")
+	fs.writeFile(outputDir .. "/" .. filePath, table.concat(pending.chunks))
+	local node = ensureTreeNode(item.segments, item.className)
+	node.sourcePath = filePath
+	node.properties = properties
 	exportedScripts[key] = {
+		path = pathFor(item.segments),
+		segments = item.segments,
+		filePath = filePath,
 		className = item.className,
 		disabled = item.disabled,
 		runContext = item.runContext,
@@ -122,13 +131,14 @@ local function processItem(item)
 	elseif item.kind == "SkippedScript" then
 		exportFailures[#exportFailures + 1] = {
 			path = pathFor(item.segments),
+			segments = item.segments,
 			className = item.className,
 			reason = item.reason or "Source unavailable",
 		}
 		log("ERROR: skipped unreadable script " .. pathFor(item.segments) .. ": " .. tostring(item.reason))
 		return true
 	elseif item.kind == "ScriptChunk" then
-		local key = pathFor(item.segments)
+		local key = pathKey(item.segments)
 		local pending = pendingScripts[key]
 		if not pending then
 			pending = { item = item, chunks = table.create(item.totalChunks), received = 0 }
@@ -153,15 +163,27 @@ end
 
 local function writeProjectAndManifest(complete)
 	table.sort(roots, function(a, b) return a.name < b.name end)
-	local tree = { ["$className"] = "DataModel" }
-	local rootManifest = {}
-	for _, root in ipairs(roots) do
-		ensureDir(outputDir .. "/src/" .. root.name)
-		tree[root.name] = {
-			["$className"] = root.className,
-			["$path"] = "src/" .. root.name,
+	local tree = {
+		["$className"] = "DataModel",
+		["$ignoreUnknownInstances"] = false,
+	}
+	local function serializeNode(node)
+		local description = {
+			["$className"] = node.className or "Folder",
 			["$ignoreUnknownInstances"] = false,
 		}
+		if node.sourcePath then description["$path"] = node.sourcePath end
+		if node.properties and next(node.properties) then description["$properties"] = node.properties end
+		for childName, child in pairs(node.children) do
+			description[childName] = serializeNode(child)
+		end
+		return description
+	end
+	local rootManifest = {}
+	for _, root in ipairs(roots) do
+		local node = treeRoots[root.name] or { children = {} }
+		node.className = root.className
+		tree[root.name] = serializeNode(node)
 		rootManifest[#rootManifest + 1] = { name = root.name, className = root.className }
 	end
 	if complete then
@@ -175,7 +197,9 @@ local function writeProjectAndManifest(complete)
 	local scriptManifest = {}
 	for path, data in pairs(exportedScripts) do
 		scriptManifest[#scriptManifest + 1] = {
-			path = path,
+			path = data.path,
+			segments = data.segments,
+			filePath = data.filePath,
 			className = data.className,
 			disabled = data.disabled,
 			runContext = data.runContext,
@@ -186,8 +210,8 @@ local function writeProjectAndManifest(complete)
 	table.sort(scriptManifest, function(a, b) return a.path < b.path end)
 
 	local anchorManifest = {}
-	for path, className in pairs(exportedAnchors) do
-		anchorManifest[#anchorManifest + 1] = { path = path, className = className }
+	for _, data in pairs(exportedAnchors) do
+		anchorManifest[#anchorManifest + 1] = data
 	end
 	table.sort(anchorManifest, function(a, b) return a.path < b.path end)
 
