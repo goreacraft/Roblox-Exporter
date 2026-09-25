@@ -3,7 +3,11 @@ local fs = require("@lune/fs")
 local process = require("@lune/process")
 local serde = require("@lune/serde")
 
-local outputDir = (process.args[1] or "../Export_FTT"):gsub("\\", "/")
+local outputDir = (process.args[1] or "../../Export_FTT"):gsub("\\", "/")
+local debugManifest = process.args[2] == "-debug"
+if process.args[2] and not debugManifest then
+	error("Unknown export option: " .. process.args[2] .. ". Use -debug to write export_manifest.json.")
+end
 local stagingDir = outputDir .. "/.Full_Exporter_Staging"
 local previousSrcDir = outputDir .. "/.Full_Exporter_PreviousSrc"
 local projectPath = outputDir .. "/default.project.json"
@@ -261,6 +265,16 @@ local function writeProjectAndManifest(complete)
 			tree = tree,
 		}))
 	end
+	local function writeCompletionMarker()
+		fs.writeFile(stagingDir .. "/.Full_Exporter_Complete.json", serde.encode("json", {
+			status = "COMPLETE",
+			exportedScriptCount = expectedScripts,
+		}))
+	end
+	if not debugManifest then
+		if complete then writeCompletionMarker() end
+		return
+	end
 
 	local scriptManifest = {}
 	for path, data in pairs(exportedScripts) do
@@ -301,6 +315,7 @@ local function writeProjectAndManifest(complete)
 		},
 	}
 	fs.writeFile(stagingDir .. "/export_manifest.json", serde.encode("json", manifest))
+	if complete then writeCompletionMarker() end
 end
 
 if fs.isFile(outputDir) then
@@ -309,13 +324,13 @@ end
 ensureDir(outputDir)
 recoverPreviousExport()
 if fs.isDir(stagingDir) then
-	local stagedManifestPath = stagingDir .. "/export_manifest.json"
+	local stagedStatePath = stagingDir .. "/.Full_Exporter_Complete.json"
 	local stagedProjectPath = stagingDir .. "/default.project.json"
 	local stagedSourcePath = stagingDir .. "/src"
 	local stagedComplete = false
-	if fs.isFile(stagedManifestPath) and fs.isFile(stagedProjectPath) and fs.isDir(stagedSourcePath) then
-		local ok, manifest = pcall(function() return serde.decode("json", fs.readFile(stagedManifestPath)) end)
-		stagedComplete = ok and type(manifest) == "table" and manifest.status == "COMPLETE"
+	if fs.isFile(stagedStatePath) and fs.isFile(stagedProjectPath) and fs.isDir(stagedSourcePath) then
+		local ok, state = pcall(function() return serde.decode("json", fs.readFile(stagedStatePath)) end)
+		stagedComplete = ok and type(state) == "table" and state.status == "COMPLETE"
 	end
 	if stagedComplete then
 		local ok, reason = promoteCompleteExport()
@@ -391,7 +406,8 @@ net.serve(8080, function(request)
 		exportFinished = true
 		if complete and promoted then
 			log("EXPORT COMPLETE: " .. expectedScripts .. " scripts in " .. outputDir)
-			log("Review export_manifest.json, then build with: rojo build default.project.json -o preview.rbxlx")
+			if debugManifest then log("Debug manifest: " .. manifestPath) end
+			log("Build with: rojo build default.project.json -o preview.rbxlx")
 		else
 			log("EXPORT INCOMPLETE: expected " .. expectedScripts .. " scripts, received " .. tostring(data.scriptCount) .. "; " .. #exportFailures .. " source failures; see server_log_full.txt")
 			return { status = 500, headers = cors, body = "Export not installed. Check the receiver log; complete staged data is kept if promotion failed." }

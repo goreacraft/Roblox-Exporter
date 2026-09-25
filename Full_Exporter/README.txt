@@ -33,13 +33,16 @@ How to export
    into the Command Bar and run it.
 4. Wait for the receiver to report EXPORT COMPLETE. Studio's submitted message
    confirms transfer only; the receiver confirms installation.
-5. Review Export_FTT/export_manifest.json. It records scripts, ancestors,
-   exclusions, and any unreadable Source failures.
+5. For a detailed export report, start the receiver with
+   Start_Full_Export_Server.cmd -debug. Only that mode writes
+   Export_FTT/export_manifest.json, listing scripts, ancestors, and exclusions.
+   Normal exports remove any old manifest from Export_FTT.
 
 The receiver stages a complete snapshot before replacing Export_FTT/src and
 its project file. A failed scan leaves the previous export intact. If Windows
 blocks promotion, the complete staged snapshot remains for a retry when the
-receiver restarts. The receiver uses Promote_Full_Export.ps1 on Windows.
+receiver restarts. The receiver uses a temporary completion marker and
+Promote_Full_Export.ps1 on Windows; neither leaves a manifest in normal mode.
 
 Rojo live sync
 --------------

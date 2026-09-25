@@ -9,7 +9,7 @@ $stage = Join-Path $project '.Full_Exporter_Staging'
 $items = @(
     @{ Target = (Join-Path $project 'src'); Source = (Join-Path $stage 'src'); Backup = (Join-Path $project '.Full_Exporter_PreviousSrc') },
     @{ Target = (Join-Path $project 'default.project.json'); Source = (Join-Path $stage 'default.project.json'); Backup = (Join-Path $project '.Full_Exporter_PreviousProject') },
-    @{ Target = (Join-Path $project 'export_manifest.json'); Source = (Join-Path $stage 'export_manifest.json'); Backup = (Join-Path $project '.Full_Exporter_PreviousManifest') }
+    @{ Target = (Join-Path $project 'export_manifest.json'); Source = (Join-Path $stage 'export_manifest.json'); Backup = (Join-Path $project '.Full_Exporter_PreviousManifest'); Optional = $true }
 )
 
 foreach ($item in $items) {
@@ -18,22 +18,18 @@ foreach ($item in $items) {
             throw "Export path is outside the project: $path"
         }
     }
-    if (-not (Test-Path -LiteralPath $item.Source)) { throw "Staged export is missing $($item.Source)" }
+    if (-not $item.Optional -and -not (Test-Path -LiteralPath $item.Source)) { throw "Staged export is missing $($item.Source)" }
     if (Test-Path -LiteralPath $item.Backup) { throw "Previous export backup already exists: $($item.Backup)" }
 }
 
-$manifest = Get-Content -LiteralPath (Join-Path $stage 'export_manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.status -ne 'COMPLETE') { throw 'Staged export manifest is not COMPLETE' }
-$scriptCount = @($manifest.scripts).Count
-if ($scriptCount -ne $manifest.exportedScriptCount) {
-    throw "Staged script count $scriptCount differs from manifest count $($manifest.exportedScriptCount)"
-}
-foreach ($script in $manifest.scripts) {
-    $source = [IO.Path]::GetFullPath((Join-Path $stage ([string]$script.filePath)))
-    if (-not $source.StartsWith((Join-Path $stage 'src') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Script source path is outside staged src: $($script.filePath)"
-    }
-    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Staged script source is missing: $source" }
+$statePath = Join-Path $stage '.Full_Exporter_Complete.json'
+if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw 'Staged export has no completion marker' }
+$state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+if ($state.status -ne 'COMPLETE') { throw 'Staged export is not COMPLETE' }
+$scriptCount = (Get-ChildItem -LiteralPath (Join-Path $stage 'src') -Recurse -File |
+    Where-Object { $_.Extension -in '.lua', '.luau' } | Measure-Object).Count
+if ($scriptCount -ne $state.exportedScriptCount) {
+    throw "Staged script count $scriptCount differs from expected count $($state.exportedScriptCount)"
 }
 
 $backedUp = @()
@@ -46,8 +42,10 @@ try {
         }
     }
     foreach ($item in $items) {
-        Move-Item -LiteralPath $item.Source -Destination $item.Target -ErrorAction Stop
-        $installed += $item
+        if (Test-Path -LiteralPath $item.Source) {
+            Move-Item -LiteralPath $item.Source -Destination $item.Target -ErrorAction Stop
+            $installed += $item
+        }
     }
 } catch {
     $promotionError = $_
