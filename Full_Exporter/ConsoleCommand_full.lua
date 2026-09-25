@@ -14,6 +14,7 @@ local EXCLUDED_ROOTS = {
 	CorePackages = true,
 	NetworkClient = true,
 	NetworkServer = true,
+	Stats = true,
 }
 
 local function shouldExcludeName(name)
@@ -97,10 +98,6 @@ local function walk(instance, ancestors, rootName)
 	end
 
 	local segments = append(ancestors, instance.Name)
-	local nameOk, nameReason = validSegment(instance.Name)
-	if not nameOk then
-		errors[#errors + 1] = instance:GetFullName() .. " cannot be represented as a Windows path: " .. nameReason
-	end
 
 	local isSource = instance:IsA("LuaSourceContainer")
 	local supportedSource = instance:IsA("Script") or instance:IsA("LocalScript") or instance:IsA("ModuleScript")
@@ -128,6 +125,12 @@ local function walk(instance, ancestors, rootName)
 	end
 
 	if containsScripts then
+		-- Only names on an exported script's ancestry need to map to disk paths.
+		-- Game assets with unusual names but no scripts below them are irrelevant.
+		local nameOk, nameReason = validSegment(instance.Name)
+		if not nameOk then
+			errors[#errors + 1] = instance:GetFullName() .. " cannot be represented as a Windows path: " .. nameReason
+		end
 		local allSegments = withRoot(rootName, segments)
 		if not instance:IsA("Folder") and not isSource then
 			local key = pathKey(allSegments)
