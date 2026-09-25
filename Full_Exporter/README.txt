@@ -23,9 +23,9 @@ How to export
 -------------
 1. Open the intended saved place in Roblox Studio. Ensure scripts are saved and
    that you can read their Source properties.
-2. Run Start_Full_Export_Server.cmd from this folder. The target is
-   ..\..\Export_FTT\FullScriptExport_Staging. The server refuses to use a target
-   that already exists; inspect/archive it and choose another new target if needed.
+2. Run Start_Full_Export_Server.cmd from this folder. It chooses
+   ..\..\Export_FTT\FullScriptExport_Staging, then adds _1, _2, and so on if
+   that folder already exists. Existing exports are left untouched.
 3. In Studio, enable HTTP requests for the place if required by Studio settings.
    Open View > Command Bar, paste all of ConsoleCommand_full.lua, and run it.
 4. Wait for the receiver to report EXPORT COMPLETE. If it reports INCOMPLETE, read
