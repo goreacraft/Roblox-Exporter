@@ -119,7 +119,7 @@ local function promoteCompleteExport()
 					local moved = movedBackups[i]
 					if fs.isDir(moved.backup) or fs.isFile(moved.backup) then fs.move(moved.backup, moved.target) end
 				end
-				return false, tostring(reason)
+				return false, "Could not move " .. item.target .. " to " .. item.backup .. ": " .. tostring(reason)
 			end
 			movedBackups[#movedBackups + 1] = item
 		end
@@ -330,7 +330,27 @@ if fs.isFile(outputDir) then
 end
 ensureDir(outputDir)
 recoverPreviousExport()
-removeIfExists(stagingDir)
+if fs.isDir(stagingDir) then
+	local stagedManifestPath = stagingDir .. "/export_manifest.json"
+	local stagedProjectPath = stagingDir .. "/default.project.json"
+	local stagedSourcePath = stagingDir .. "/src"
+	local stagedComplete = false
+	if fs.isFile(stagedManifestPath) and fs.isFile(stagedProjectPath) and fs.isDir(stagedSourcePath) then
+		local ok, manifest = pcall(function() return serde.decode("json", fs.readFile(stagedManifestPath)) end)
+		stagedComplete = ok and type(manifest) == "table" and manifest.status == "COMPLETE"
+	end
+	if stagedComplete then
+		local ok, reason = promoteCompleteExport()
+		if ok then
+			log("Recovered and promoted a complete staged export from the previous run.")
+		else
+			log("ERROR: complete staged export still waiting for promotion: " .. reason)
+			log("Close any Explorer or editor views holding Export_FTT/src, then restart this receiver.")
+		end
+	else
+		removeIfExists(stagingDir)
+	end
+end
 log("Full script export server listening on http://localhost:8080")
 log("Project output: " .. outputDir)
 log("The current src tree is preserved unless the complete export succeeds.")
@@ -357,6 +377,7 @@ net.serve(8080, function(request)
 	if data.type == "Begin" then
 		if exportStarted then return { status = 409, headers = cors, body = "Export already started" } end
 		exportStarted = true
+		removeIfExists(stagingDir)
 		ensureDir(stagingDir)
 		expectedScripts = data.scriptCount or 0
 		roots = data.roots or {}
@@ -385,17 +406,17 @@ net.serve(8080, function(request)
 			if promotionOk then
 				promoted = true
 			else
-				complete = false
 				log("ERROR: could not promote complete export: " .. promotionError)
 			end
 		end
-		if not promoted then removeIfExists(stagingDir) end
+		if not promoted and not complete then removeIfExists(stagingDir) end
 		exportFinished = true
 		if complete and promoted then
 			log("EXPORT COMPLETE: " .. expectedScripts .. " scripts in " .. outputDir)
 			log("Review export_manifest.json, then build with: rojo build default.project.json -o preview.rbxlx")
 		else
 			log("EXPORT INCOMPLETE: expected " .. expectedScripts .. " scripts, received " .. tostring(data.scriptCount) .. "; " .. #exportFailures .. " source failures; see server_log_full.txt")
+			return { status = 500, headers = cors, body = "Export not installed. Check the receiver log; complete staged data is kept if promotion failed." }
 		end
 	else
 		return { status = 400, headers = cors, body = "Unknown message type" }
