@@ -130,8 +130,11 @@ local function walk(instance, ancestors, rootName)
 		end
 		local allSegments = withRoot(rootName, segments)
 		if not instance:IsA("Folder") and not isSource then
-			local key = pathKey(allSegments)
-			anchors[key] = { segments = allSegments, className = instance.ClassName }
+			anchors[#anchors + 1] = {
+				segments = allSegments,
+				className = instance.ClassName,
+				instance = instance,
+			}
 		end
 	end
 
@@ -163,30 +166,73 @@ end
 
 table.sort(scripts, function(a, b) return pathKey(a.segments) < pathKey(b.segments) end)
 local orderedAnchors = {}
-for _, anchor in pairs(anchors) do orderedAnchors[#orderedAnchors + 1] = anchor end
+for _, anchor in ipairs(anchors) do orderedAnchors[#orderedAnchors + 1] = anchor end
 table.sort(orderedAnchors, function(a, b) return pathKey(a.segments) < pathKey(b.segments) end)
 table.sort(roots, function(a, b) return a.name < b.name end)
 
 -- Folder and anchor descendants share directory prefixes, which are expected.
 -- Only two different Studio instances targeting exactly the same segment path collide.
-local function registerOwner(segments, description)
+local function ownerDescription(owner)
+	local instance = owner.instance
+	if not instance then
+		return owner.role .. " (" .. owner.className .. ")"
+	end
+
+	local parent = instance.Parent
+	local siblingIndex = 0
+	local sameNameCount = 0
+	if parent then
+		for _, sibling in ipairs(parent:GetChildren()) do
+			if sibling.Name == instance.Name then
+				sameNameCount = sameNameCount + 1
+				if sibling == instance then siblingIndex = sameNameCount end
+			end
+		end
+	end
+
+	local siblingText = sameNameCount > 1
+		and string.format("sibling %d of %d with this name", siblingIndex, sameNameCount)
+		or ""
+	local parentPath = parent and parent:GetFullName() or "<service root>"
+	return string.format(
+		'%s "%s" (%s)%s; parent: %s; full path: %s',
+		owner.role,
+		instance.Name,
+		instance.ClassName,
+		siblingText ~= "" and (", " .. siblingText) or "",
+		parentPath,
+		instance:GetFullName()
+	)
+end
+
+local function registerOwner(segments, owner)
 	local key = pathKey(segments)
 	local previous = pathOwners[key]
 	if previous then
-		errors[#errors + 1] = "Duplicate Studio names collapse to the same file path " .. key .. " (" .. previous .. " and " .. description .. ")"
+		errors[#errors + 1] = "Two instances map to the same Rojo child path:\n  "
+			.. ownerDescription(previous) .. "\n  " .. ownerDescription(owner)
+			.. "\n  Rename the sibling instances so each has a unique Name."
 	else
-		pathOwners[key] = description
+		pathOwners[key] = owner
 	end
 end
 
 for _, anchor in ipairs(orderedAnchors) do
-	registerOwner(anchor.segments, "ancestor " .. anchor.className)
+	registerOwner(anchor.segments, {
+		role = "ancestor",
+		className = anchor.className,
+		instance = anchor.instance,
+	})
 end
 for _, record in ipairs(scripts) do
-	registerOwner(record.segments, "script " .. record.className)
+	registerOwner(record.segments, {
+		role = "script",
+		className = record.className,
+		instance = record.instance,
+	})
 end
 if #errors > 0 then
-	warn("❌ Full export stopped: generated paths collide after filesystem normalization.")
+	warn("❌ Full export stopped: duplicate sibling names prevent a unique Rojo hierarchy.")
 	for i = 1, math.min(#errors, 40) do warn(errors[i]) end
 	if #errors > 40 then warn((#errors - 40) .. " additional path errors omitted") end
 	return
