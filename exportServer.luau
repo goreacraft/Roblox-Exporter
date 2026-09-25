@@ -34,63 +34,52 @@ net.serve(8080, function(request)
             return { status = 200, body = "OK, but failed to parse" } 
         end
         
-        -- Check for ignore flag
-        if (data.name and data.name:find("_%?")) or (data.path and data.path:find("_%?")) then
-            log("Ignored (contains _?): " .. (data.name or data.path))
-            return { status = 200, body = "Ignored" }
-        end
-        
-        -- Create directory path
-        local currentPath = outputDir
-        for part in data.path:gmatch("[^/]+") do
-            part = part:gsub('[<>:"\\|?*]', '_') -- sanitize folder name
-            currentPath = currentPath .. "/" .. part
-            if not fs.isDir(currentPath) then
-                fs.writeDir(currentPath)
-            end
-        end
-        
-        if data.type == "Folder" then
-            return { status = 200, body = "OK" }
-        end
-        
-        local ext = ".lua"
-        if data.className == "Script" then ext = ".server.lua" end
-        if data.className == "LocalScript" then ext = ".client.lua" end
-        local safeName = data.name:gsub('[<>:"/\\|?*]', '_')
-        local filePath = currentPath .. "/" .. safeName .. ext
-        
-        if data.type == "ScriptChunk" then
-            if data.chunkIndex == 1 then
-                fs.writeFile(filePath, data.source)
-            else
-                fs.writeFile(filePath, fs.readFile(filePath) .. data.source)
+        -- Process a single item
+        local function processItem(item)
+            -- Check for ignore flag
+            if (item.name and item.name:find("_%?")) or (item.path and item.path:find("_%?")) then
+                log("Ignored (contains _?): " .. (item.name or item.path))
+                return
             end
             
-            if data.chunkIndex == data.totalChunks then
-                log("Exported Chunked: " .. data.path .. "/" .. safeName .. ext)
-                if data.disabled or (data.runContext and data.runContext ~= "Legacy") then
-                    local metaPath = currentPath .. "/" .. safeName .. ".meta.json"
-                    local props = {}
-                    if data.disabled then table.insert(props, '    "Disabled": true') end
-                    if data.runContext and data.runContext ~= "Legacy" then table.insert(props, '    "RunContext": "' .. data.runContext .. '"') end
-                    fs.writeFile(metaPath, '{\n  "properties": {\n' .. table.concat(props, ",\n") .. '\n  }\n}')
+            -- Create directory path
+            local currentPath = outputDir
+            for part in item.path:gmatch("[^/]+") do
+                part = part:gsub('[<>:"\\|?*]', '_')
+                currentPath = currentPath .. "/" .. part
+                if not fs.isDir(currentPath) then
+                    fs.writeDir(currentPath)
                 end
             end
-            return { status = 200, body = "OK" }
+            
+            if item.type == "Folder" then return end
+            
+            local ext = ".lua"
+            if item.className == "Script" then ext = ".server.lua" end
+            if item.className == "LocalScript" then ext = ".client.lua" end
+            local safeName = item.name:gsub('[<>:"/\\|?*]', '_')
+            local filePath = currentPath .. "/" .. safeName .. ext
+            
+            -- Write script
+            fs.writeFile(filePath, item.source)
+            log("Exported: " .. item.path .. "/" .. safeName .. ext)
+            
+            -- Write meta.json if needed
+            if item.disabled or (item.runContext and item.runContext ~= "Legacy") then
+                local metaPath = currentPath .. "/" .. safeName .. ".meta.json"
+                local props = {}
+                if item.disabled then table.insert(props, '    "Disabled": true') end
+                if item.runContext and item.runContext ~= "Legacy" then table.insert(props, '    "RunContext": "' .. item.runContext .. '"') end
+                fs.writeFile(metaPath, '{\n  "properties": {\n' .. table.concat(props, ",\n") .. '\n  }\n}')
+            end
         end
-        
-        -- Write normal script
-        fs.writeFile(filePath, data.source)
-        log("Exported: " .. data.path .. "/" .. safeName .. ext)
-        
-        -- Write meta.json if needed
-        if data.disabled or (data.runContext and data.runContext ~= "Legacy") then
-            local metaPath = currentPath .. "/" .. safeName .. ".meta.json"
-            local props = {}
-            if data.disabled then table.insert(props, '    "Disabled": true') end
-            if data.runContext and data.runContext ~= "Legacy" then table.insert(props, '    "RunContext": "' .. data.runContext .. '"') end
-            fs.writeFile(metaPath, '{\n  "properties": {\n' .. table.concat(props, ",\n") .. '\n  }\n}')
+
+        if data.type == "Batch" then
+            for _, item in ipairs(data.items) do
+                processItem(item)
+            end
+        else
+            processItem(data)
         end
         
         return { status = 200, body = "OK" }

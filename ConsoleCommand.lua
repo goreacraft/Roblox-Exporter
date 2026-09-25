@@ -9,14 +9,37 @@ local SERVICES = {
     ["StarterPlayer.StarterCharacterScripts"] = "src/StarterPlayer/StarterCharacterScripts"
 }
 
-local MAX_CHUNK_SIZE = 800000 -- 800 KB to stay safely under 1 MB limit
+local MAX_PAYLOAD_SIZE = 800000 -- 800 KB to stay safely under 1 MB limit
+
+local batch = {}
+local batchSize = 0
+
+local function flushBatch()
+    if #batch > 0 then
+        HttpService:PostAsync("http://localhost:8080", HttpService:JSONEncode({
+            type = "Batch",
+            items = batch
+        }))
+        table.clear(batch)
+        batchSize = 0
+    end
+end
+
+local function queueData(data)
+    local json = HttpService:JSONEncode(data)
+    if batchSize + #json > MAX_PAYLOAD_SIZE then
+        flushBatch()
+    end
+    table.insert(batch, data)
+    batchSize = batchSize + #json + 2 -- plus 2 for commas
+end
 
 local function send(path, obj)
     if obj:IsA("Folder") then
-        HttpService:PostAsync("http://localhost:8080", HttpService:JSONEncode({
+        queueData({
             type = "Folder",
             path = path .. "/" .. obj.Name
-        }))
+        })
         for _, child in ipairs(obj:GetChildren()) do
             send(path .. "/" .. obj.Name, child)
         end
@@ -36,33 +59,15 @@ local function send(path, obj)
             return
         end
         
-        if #source <= MAX_CHUNK_SIZE then
-            HttpService:PostAsync("http://localhost:8080", HttpService:JSONEncode({
-                type = "Script",
-                path = path,
-                name = obj.Name,
-                className = obj.ClassName,
-                source = source,
-                disabled = obj:IsA("BaseScript") and obj.Disabled or false,
-                runContext = runContext
-            }))
-        else
-            local totalChunks = math.ceil(#source / MAX_CHUNK_SIZE)
-            for i = 1, totalChunks do
-                local chunk = source:sub((i-1)*MAX_CHUNK_SIZE + 1, i*MAX_CHUNK_SIZE)
-                HttpService:PostAsync("http://localhost:8080", HttpService:JSONEncode({
-                    type = "ScriptChunk",
-                    path = path,
-                    name = obj.Name,
-                    className = obj.ClassName,
-                    chunkIndex = i,
-                    totalChunks = totalChunks,
-                    source = chunk,
-                    disabled = obj:IsA("BaseScript") and obj.Disabled or false,
-                    runContext = runContext
-                }))
-            end
-        end
+        queueData({
+            type = "Script",
+            path = path,
+            name = obj.Name,
+            className = obj.ClassName,
+            source = source,
+            disabled = obj:IsA("BaseScript") and obj.Disabled or false,
+            runContext = runContext
+        })
         
         for _, child in ipairs(obj:GetChildren()) do
             send(path .. "/" .. obj.Name, child)
@@ -81,4 +86,5 @@ for servicePath, exportPath in pairs(SERVICES) do
         end
     end
 end
+flushBatch()
 print("✅ Export complete!")
