@@ -40,9 +40,9 @@ How to export
    Explorer. The manifest records every exported script, anchor, exclusion, and
    unreadable Source failure.
 
-If Studio submits every script but the receiver reports Access is denied during
-promotion, close Explorer/editor views holding Export_FTT/src and restart the
-receiver. It keeps a complete staged export and retries promotion at startup.
+On Windows the receiver uses Promote_Full_Export.ps1 to install a complete staged
+export. If promotion reports Access is denied, close views holding Export_FTT/src
+and restart the receiver. The complete staged export is kept for that retry.
 
 Generated layout
 ----------------
@@ -109,9 +109,9 @@ How to export
    Explorer. The manifest records every exported script, anchor, exclusion, and
    unreadable Source failure.
 
-If Studio submits every script but the receiver reports Access is denied during
-promotion, close Explorer/editor views holding Export_FTT/src and restart the
-receiver. It keeps a complete staged export and retries promotion at startup.
+On Windows the receiver uses Promote_Full_Export.ps1 to install a complete staged
+export. If promotion reports Access is denied, close views holding Export_FTT/src
+and restart the receiver. The complete staged export is kept for that retry.
 
 Generated layout
 ----------------

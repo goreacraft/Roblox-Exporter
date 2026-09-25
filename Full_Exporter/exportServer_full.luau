@@ -100,54 +100,21 @@ local function cleanOldStagingFolders()
 end
 
 local function promoteCompleteExport()
-	local sourcePath = outputDir .. "/src"
-	local stagedSourcePath = stagingDir .. "/src"
-	local backups = {
-		{ target = sourcePath, backup = previousSrcDir, directory = true },
-		{ target = projectPath, backup = previousProjectPath },
-		{ target = manifestPath, backup = previousManifestPath },
-	}
-
-	-- Move each old target aside before installing anything. If a backup move
-	-- fails, restore any earlier moves and leave the old export in place.
-	local movedBackups = {}
-	for _, item in ipairs(backups) do
-		if fs.isDir(item.target) or fs.isFile(item.target) then
-			local ok, reason = pcall(function() fs.move(item.target, item.backup) end)
-			if not ok then
-				for i = #movedBackups, 1, -1 do
-					local moved = movedBackups[i]
-					if fs.isDir(moved.backup) or fs.isFile(moved.backup) then fs.move(moved.backup, moved.target) end
-				end
-				return false, "Could not move " .. item.target .. " to " .. item.backup .. ": " .. tostring(reason)
-			end
-			movedBackups[#movedBackups + 1] = item
-		end
-	end
-
-	local installed = {}
-	local ok, reason = pcall(function()
-		fs.move(stagedSourcePath, sourcePath)
-		installed[#installed + 1] = sourcePath
-		fs.move(stagingDir .. "/default.project.json", projectPath)
-		installed[#installed + 1] = projectPath
-		fs.move(stagingDir .. "/export_manifest.json", manifestPath)
-		installed[#installed + 1] = manifestPath
+	local commandOk, result = pcall(function()
+		return process.exec("powershell.exe", {
+			"-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+			process.cwd .. "/Promote_Full_Export.ps1", outputDir,
+		})
 	end)
-	if not ok then
-		for i = #installed, 1, -1 do removeIfExists(installed[i]) end
-		for i = #movedBackups, 1, -1 do
-			local item = movedBackups[i]
-			if fs.isDir(item.backup) or fs.isFile(item.backup) then fs.move(item.backup, item.target) end
-		end
-		return false, tostring(reason)
+	if not commandOk then return false, tostring(result) end
+	if not result.ok then
+		return false, result.stderr ~= "" and result.stderr or result.stdout
 	end
-
-	for _, item in ipairs(movedBackups) do removeIfExists(item.backup) end
-	removeIfExists(stagingDir)
+	for line in result.stdout:gmatch("[^\r\n]+") do log(line) end
 	cleanOldStagingFolders()
 	return true
 end
+
 local function ensureTreeNode(segments, className)
 	local rootName = segments[2]
 	local node = treeRoots[rootName]
