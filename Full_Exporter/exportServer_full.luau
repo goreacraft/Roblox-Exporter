@@ -221,12 +221,12 @@ local function writeProjectAndManifest(complete)
 	table.sort(roots, function(a, b) return a.name < b.name end)
 	local tree = {
 		["$className"] = "DataModel",
-		["$ignoreUnknownInstances"] = false,
+		["$ignoreUnknownInstances"] = true,
 	}
 	local function serializeNode(node)
 		local description = {
 			["$className"] = node.className or "Folder",
-			["$ignoreUnknownInstances"] = false,
+			["$ignoreUnknownInstances"] = true,
 		}
 		if node.sourcePath then description["$path"] = node.sourcePath end
 		if node.properties and next(node.properties) then description["$properties"] = node.properties end
