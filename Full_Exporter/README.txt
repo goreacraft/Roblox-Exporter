@@ -3,8 +3,9 @@ FULL ROBLOX SCRIPT EXPORTER
 Purpose
 -------
 Export saved Script, LocalScript, and ModuleScript instances from the open Studio
-place. Scripts inside models and other instances keep their Studio ancestry in the
-Rojo project tree. This is a script overlay for source control and live sync.
+place. Scripts inside models and other instances keep their Studio ancestry through
+filesystem paths and generated metadata. This is a script overlay for source control
+and live sync.
 
 Sources follow their Studio hierarchy under Export_FTT/src. Each script has a
 named directory containing init.server.lua, init.client.lua, or init.lua. Studio
@@ -13,7 +14,8 @@ warnings so you can rename them before rerunning.
 
 The export does not include terrain, geometry, model properties, meshes, or other
 assets. Keep the Roblox place as the source of truth for those. Every mapped node
-uses $ignoreUnknownInstances:true so Rojo leaves other Studio children alone.
+uses $ignoreUnknownInstances:true or init.meta.json to preserve other Studio
+children.
 
 Excluded by design
 ------------------
@@ -41,10 +43,11 @@ receiver restarts. The receiver uses Promote_Full_Export.ps1 on Windows.
 
 Rojo live sync
 --------------
-The generated default.project.json maps only scripts and their existing
-ancestors. Its $ignoreUnknownInstances:true settings preserve objects that
-are not represented by the export. Inspect Rojo's initial sync preview in a
-copy of the place before accepting any changes.
+The generated default.project.json maps each service to its src folder. Generated
+init.meta.json files mark Model, Part, GUI, and other non-Folder ancestors with
+their original classes, preserve unknown Studio children, and carry script
+properties. Inspect Rojo's initial sync preview in a copy of the place before
+accepting any changes.
 
 This is not a full place backup. A new empty place cannot be reconstructed from
 it because terrain, models, and other asset properties are absent.

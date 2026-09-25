@@ -223,24 +223,35 @@ local function writeProjectAndManifest(complete)
 		["$className"] = "DataModel",
 		["$ignoreUnknownInstances"] = true,
 	}
-	local function serializeNode(node)
-		local description = {
-			["$className"] = node.className or "Folder",
-			["$ignoreUnknownInstances"] = true,
-		}
-		if node.sourcePath then description["$path"] = node.sourcePath end
-		if node.properties and next(node.properties) then description["$properties"] = node.properties end
-		for childName, child in pairs(node.children) do
-			description[childName] = serializeNode(child)
+	local function writeNodeMeta(node, segments)
+		local metadata = { ignoreUnknownInstances = true }
+		if not node.sourcePath and node.className and node.className ~= "Folder" then
+			metadata.className = node.className
 		end
-		return description
+		if node.properties and next(node.properties) then metadata.properties = node.properties end
+		local directory = stagingDir .. "/src/" .. table.concat(segments, "/")
+		ensureDir(directory)
+		fs.writeFile(directory .. "/init.meta.json", serde.encode("json", metadata))
+		for childName, child in pairs(node.children) do
+			local childSegments = table.clone(segments)
+			childSegments[#childSegments + 1] = childName
+			writeNodeMeta(child, childSegments)
+		end
 	end
 	local rootManifest = {}
 	for _, root in ipairs(roots) do
 		local node = treeRoots[root.name] or { children = {} }
-		node.className = root.className
-		tree[root.name] = serializeNode(node)
+		tree[root.name] = {
+			["$className"] = root.className,
+			["$path"] = "src/" .. root.name,
+			["$ignoreUnknownInstances"] = true,
+		}
 		rootManifest[#rootManifest + 1] = { name = root.name, className = root.className }
+		if complete then
+			for childName, child in pairs(node.children) do
+				writeNodeMeta(child, { root.name, childName })
+			end
+		end
 	end
 	if complete then
 		ensureDir(stagingDir .. "/src")

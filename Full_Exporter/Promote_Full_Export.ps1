@@ -24,9 +24,16 @@ foreach ($item in $items) {
 
 $manifest = Get-Content -LiteralPath (Join-Path $stage 'export_manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.status -ne 'COMPLETE') { throw 'Staged export manifest is not COMPLETE' }
-$scriptCount = (Get-ChildItem -LiteralPath (Join-Path $stage 'src') -Recurse -File | Measure-Object).Count
+$scriptCount = @($manifest.scripts).Count
 if ($scriptCount -ne $manifest.exportedScriptCount) {
     throw "Staged script count $scriptCount differs from manifest count $($manifest.exportedScriptCount)"
+}
+foreach ($script in $manifest.scripts) {
+    $source = [IO.Path]::GetFullPath((Join-Path $stage ([string]$script.filePath)))
+    if (-not $source.StartsWith((Join-Path $stage 'src') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Script source path is outside staged src: $($script.filePath)"
+    }
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Staged script source is missing: $source" }
 }
 
 $backedUp = @()
