@@ -36,6 +36,9 @@ local function validSegment(name)
 end
 
 local function append(array, value)
+	if type(value) ~= "string" then
+		error(string.format("Cannot append path value of type %s", typeof(value)))
+	end
 	local result = table.create(#array + 1)
 	for i, item in ipairs(array) do
 		if type(item) ~= "string" then
@@ -44,6 +47,17 @@ local function append(array, value)
 		result[i] = item
 	end
 	result[#result + 1] = value
+	return result
+end
+
+local function withRoot(rootName, segments)
+	local result = { "src", rootName }
+	for _, segment in ipairs(segments) do
+		if type(segment) ~= "string" then
+			error(string.format("Invalid ancestor path segment (%s): %s", typeof(segment), tostring(segment)))
+		end
+		result[#result + 1] = segment
+	end
 	return result
 end
 
@@ -96,7 +110,7 @@ local function walk(instance, ancestors, rootName)
 		if not supportedSource then
 			errors[#errors + 1] = "Unsupported LuaSourceContainer class " .. instance.ClassName .. " at " .. instance:GetFullName()
 		else
-			local allSegments = append({ "src", rootName }, segments)
+			local allSegments = withRoot(rootName, segments)
 			scripts[#scripts + 1] = {
 				instance = instance,
 				segments = allSegments,
@@ -114,7 +128,7 @@ local function walk(instance, ancestors, rootName)
 	end
 
 	if containsScripts then
-		local allSegments = append({ "src", rootName }, segments)
+		local allSegments = withRoot(rootName, segments)
 		if not instance:IsA("Folder") and not isSource then
 			local key = pathKey(allSegments)
 			anchors[key] = { segments = allSegments, className = instance.ClassName }
