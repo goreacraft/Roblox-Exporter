@@ -3,7 +3,13 @@ local fs = require("@lune/fs")
 local process = require("@lune/process")
 local serde = require("@lune/serde")
 
-local outputDir = (process.args[1] or "../Export_FTT/FullScriptExport_Staging"):gsub("\\", "/")
+local outputDir = (process.args[1] or "../Export_FTT"):gsub("\\", "/")
+local stagingDir = outputDir .. "/.Full_Exporter_Staging"
+local previousSrcDir = outputDir .. "/.Full_Exporter_PreviousSrc"
+local projectPath = outputDir .. "/default.project.json"
+local manifestPath = outputDir .. "/export_manifest.json"
+local previousProjectPath = outputDir .. "/.Full_Exporter_PreviousProject"
+local previousManifestPath = outputDir .. "/.Full_Exporter_PreviousManifest"
 local logPath = "server_log_full.txt"
 local pendingScripts = {}
 local exportedScripts = {}
@@ -42,23 +48,106 @@ end
 
 
 local function scriptFilePath(segments, className)
-	local key = pathKey(segments)
-	local hash = 2166136261
-	for i = 1, #key do
-		hash = (hash * 31 + string.byte(key, i)) % 4294967296
+	local directories = { "src" }
+	for i = 2, #segments do
+		directories[#directories + 1] = segments[i]
 	end
 	local ext = className == "Script" and ".server.lua"
 		or className == "LocalScript" and ".client.lua"
 		or ".lua"
-	local filename = string.format("src/scripts/%08x%s", hash, ext)
-	local previous = scriptFileOwners[filename]
+	local filename = table.concat(directories, "/") .. "/init" .. ext
+	local key = pathKey(segments)
+	local collisionKey = filename:lower()
+	local previous = scriptFileOwners[collisionKey]
 	if previous and previous ~= key then
-		return nil, "script source path hash collision between " .. previous .. " and " .. key
+		return nil, "script source path collision between " .. previous .. " and " .. key
 	end
-	scriptFileOwners[filename] = key
+	scriptFileOwners[collisionKey] = key
 	return filename
 end
 
+local function recoverBackup(targetPath, backupPath, isDirectory)
+	if fs.isDir(backupPath) or fs.isFile(backupPath) then
+		if fs.isDir(targetPath) or fs.isFile(targetPath) then
+			if isDirectory then fs.removeDir(backupPath) else fs.removeFile(backupPath) end
+		else
+			fs.move(backupPath, targetPath)
+		end
+	end
+end
+
+local function recoverPreviousExport()
+	recoverBackup(outputDir .. "/src", previousSrcDir, true)
+	recoverBackup(projectPath, previousProjectPath, false)
+	recoverBackup(manifestPath, previousManifestPath, false)
+end
+
+local function removeIfExists(path)
+	if fs.isDir(path) then fs.removeDir(path)
+	elseif fs.isFile(path) then fs.removeFile(path) end
+end
+
+local function cleanOldStagingFolders()
+	for _, name in ipairs(fs.readDir(outputDir)) do
+		if name == "FullScriptExport_Staging" or name:match("^FullScriptExport_Staging_%d+$") then
+			local path = outputDir .. "/" .. name
+			if fs.isDir(path) then
+				fs.removeDir(path)
+				log("Removed obsolete exporter folder: " .. name)
+			end
+		end
+	end
+end
+
+local function promoteCompleteExport()
+	local sourcePath = outputDir .. "/src"
+	local stagedSourcePath = stagingDir .. "/src"
+	local backups = {
+		{ target = sourcePath, backup = previousSrcDir, directory = true },
+		{ target = projectPath, backup = previousProjectPath },
+		{ target = manifestPath, backup = previousManifestPath },
+	}
+
+	-- Move each old target aside before installing anything. If a backup move
+	-- fails, restore any earlier moves and leave the old export in place.
+	local movedBackups = {}
+	for _, item in ipairs(backups) do
+		if fs.isDir(item.target) or fs.isFile(item.target) then
+			local ok, reason = pcall(function() fs.move(item.target, item.backup) end)
+			if not ok then
+				for i = #movedBackups, 1, -1 do
+					local moved = movedBackups[i]
+					if fs.isDir(moved.backup) or fs.isFile(moved.backup) then fs.move(moved.backup, moved.target) end
+				end
+				return false, tostring(reason)
+			end
+			movedBackups[#movedBackups + 1] = item
+		end
+	end
+
+	local installed = {}
+	local ok, reason = pcall(function()
+		fs.move(stagedSourcePath, sourcePath)
+		installed[#installed + 1] = sourcePath
+		fs.move(stagingDir .. "/default.project.json", projectPath)
+		installed[#installed + 1] = projectPath
+		fs.move(stagingDir .. "/export_manifest.json", manifestPath)
+		installed[#installed + 1] = manifestPath
+	end)
+	if not ok then
+		for i = #installed, 1, -1 do removeIfExists(installed[i]) end
+		for i = #movedBackups, 1, -1 do
+			local item = movedBackups[i]
+			if fs.isDir(item.backup) or fs.isFile(item.backup) then fs.move(item.backup, item.target) end
+		end
+		return false, tostring(reason)
+	end
+
+	for _, item in ipairs(movedBackups) do removeIfExists(item.backup) end
+	removeIfExists(stagingDir)
+	cleanOldStagingFolders()
+	return true
+end
 local function ensureTreeNode(segments, className)
 	local rootName = segments[2]
 	local node = treeRoots[rootName]
@@ -108,8 +197,8 @@ local function finishScript(key, pending)
 		log("ERROR: " .. pathError)
 		return false
 	end
-	ensureDir(outputDir .. "/src/scripts")
-	fs.writeFile(outputDir .. "/" .. filePath, table.concat(pending.chunks))
+	ensureDir((stagingDir .. "/" .. filePath):match("^(.*)/[^/]+$"))
+	fs.writeFile(stagingDir .. "/" .. filePath, table.concat(pending.chunks))
 	local node = ensureTreeNode(item.segments, item.className)
 	node.sourcePath = filePath
 	node.properties = properties
@@ -187,7 +276,8 @@ local function writeProjectAndManifest(complete)
 		rootManifest[#rootManifest + 1] = { name = root.name, className = root.className }
 	end
 	if complete then
-		fs.writeFile(outputDir .. "/default.project.json", serde.encode("json", {
+		ensureDir(stagingDir .. "/src")
+		fs.writeFile(stagingDir .. "/default.project.json", serde.encode("json", {
 			name = "Full script overlay export",
 			emitLegacyScripts = true,
 			tree = tree,
@@ -232,15 +322,18 @@ local function writeProjectAndManifest(complete)
 			"Model and other non-folder parents are class anchors; unknown Studio children are preserved when live-synced.",
 		},
 	}
-	fs.writeFile(outputDir .. "/export_manifest.json", serde.encode("json", manifest))
+	fs.writeFile(stagingDir .. "/export_manifest.json", serde.encode("json", manifest))
 end
 
-if fs.isDir(outputDir) or fs.isFile(outputDir) then
-	error("Export target already exists: " .. outputDir .. ". Rename it or choose a new staging path; this exporter never clears an existing target.")
+if fs.isFile(outputDir) then
+	error("Export target is a file; expected the existing project directory: " .. outputDir)
 end
 ensureDir(outputDir)
+recoverPreviousExport()
+removeIfExists(stagingDir)
 log("Full script export server listening on http://localhost:8080")
-log("Staging output: " .. outputDir)
+log("Project output: " .. outputDir)
+log("The current src tree is preserved unless the complete export succeeds.")
 log("Waiting for Studio inventory...")
 
 net.serve(8080, function(request)
@@ -252,7 +345,7 @@ net.serve(8080, function(request)
 	if request.method == "OPTIONS" then return { status = 200, headers = cors } end
 	if request.method ~= "POST" then return { status = 404, body = "Not Found" } end
 	if exportFinished then
-		return { status = 409, body = "Export already finished; restart with a new staging directory" }
+		return { status = 409, body = "Export already finished; restart the receiver for another export" }
 	end
 	local bodyType = type(request.body)
 	local body = bodyType == "buffer" and buffer.tostring(request.body) or tostring(request.body)
@@ -264,6 +357,7 @@ net.serve(8080, function(request)
 	if data.type == "Begin" then
 		if exportStarted then return { status = 409, headers = cors, body = "Export already started" } end
 		exportStarted = true
+		ensureDir(stagingDir)
 		expectedScripts = data.scriptCount or 0
 		roots = data.roots or {}
 		excludedSubtrees = data.excludedSubtrees or {}
@@ -285,12 +379,23 @@ net.serve(8080, function(request)
 			return count == expectedScripts
 		end)()
 		writeProjectAndManifest(complete)
-		exportFinished = true
+		local promoted = false
 		if complete then
+			local promotionOk, promotionError = promoteCompleteExport()
+			if promotionOk then
+				promoted = true
+			else
+				complete = false
+				log("ERROR: could not promote complete export: " .. promotionError)
+			end
+		end
+		if not promoted then removeIfExists(stagingDir) end
+		exportFinished = true
+		if complete and promoted then
 			log("EXPORT COMPLETE: " .. expectedScripts .. " scripts in " .. outputDir)
 			log("Review export_manifest.json, then build with: rojo build default.project.json -o preview.rbxlx")
 		else
-			log("EXPORT INCOMPLETE: expected " .. expectedScripts .. " scripts, received " .. tostring(data.scriptCount) .. "; " .. #exportFailures .. " source failures; see export_manifest.json")
+			log("EXPORT INCOMPLETE: expected " .. expectedScripts .. " scripts, received " .. tostring(data.scriptCount) .. "; " .. #exportFailures .. " source failures; see server_log_full.txt")
 		end
 	else
 		return { status = 400, headers = cors, body = "Unknown message type" }

@@ -2,20 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
-set "EXPORT_BASE=..\..\Export_FTT\FullScriptExport_Staging"
-set "EXPORT_TARGET=%EXPORT_BASE%"
-set /a EXPORT_RUN=1
-
-:choose_target
-if exist "%EXPORT_TARGET%" (
-    set "EXPORT_TARGET=%EXPORT_BASE%_%EXPORT_RUN%"
-    set /a EXPORT_RUN+=1
-    goto choose_target
-)
-
+set "EXPORT_TARGET=..\..\Export_FTT"
 echo Starting the full script export receiver.
-echo Output: %EXPORT_TARGET%
-echo Existing export folders are preserved.
+echo Project: %EXPORT_TARGET%
+echo Existing src files are replaced only after a complete export arrives.
 lune run exportServer_full.luau "%EXPORT_TARGET%"
 set "EXPORT_EXIT=%ERRORLEVEL%"
 echo.

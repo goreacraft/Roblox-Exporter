@@ -22,11 +22,26 @@ local function shouldExcludeName(name)
 end
 
 local function validSegment(name)
-	if name == "" then
-		return false, "empty Roblox instance name"
-	end
+	if name == "" then return false, "Name is empty" end
+	if name == "." or name == ".." then return false, "Name cannot be . or .." end
 	if string.sub(name, 1, 1) == "$" then
-		return false, "Rojo reserves instance-description keys beginning with $"
+		return false, "Rojo reserves names beginning with $"
+	end
+	for i = 1, #name do
+		local byte = string.byte(name, i)
+		if byte < 32 or byte == 127 or byte == 34 or byte == 42 or byte == 47
+			or byte == 58 or byte == 60 or byte == 62 or byte == 63 or byte == 92 or byte == 124 then
+			return false, "Name contains a character Windows cannot use in a file or folder name"
+		end
+	end
+	if name:match("[%. ]$") then
+		return false, "Name ends in a dot or space, which Windows cannot use"
+	end
+	local upper = name:upper()
+	local stem = upper:match("^([^.]+)") or upper
+	if stem == "CON" or stem == "PRN" or stem == "AUX" or stem == "NUL"
+		or stem:match("^COM[1-9]$") or stem:match("^LPT[1-9]$") then
+		return false, "Name is reserved by Windows"
 	end
 	return true
 end
@@ -126,10 +141,10 @@ local function walk(instance, ancestors, rootName)
 		-- Game assets with unusual names but no scripts below them are irrelevant.
 		local nameOk, nameReason = validSegment(instance.Name)
 		if not nameOk then
-			errors[#errors + 1] = instance:GetFullName() .. " cannot be represented as a Windows path: " .. nameReason
+			errors[#errors + 1] = { kind = "InvalidName", instance = instance, reason = nameReason }
 		end
 		local allSegments = withRoot(rootName, segments)
-		if not instance:IsA("Folder") and not isSource then
+		if not isSource then
 			anchors[#anchors + 1] = {
 				segments = allSegments,
 				className = instance.ClassName,
@@ -150,7 +165,7 @@ for _, root in ipairs(game:GetChildren()) do
 		if rootContainsScripts then
 			local rootOk, rootReason = validSegment(root.Name)
 			if not rootOk then
-				errors[#errors + 1] = "Service root " .. root.Name .. " cannot be represented: " .. rootReason
+				errors[#errors + 1] = { kind = "InvalidName", instance = root, reason = rootReason }
 			else
 				roots[#roots + 1] = { name = root.Name, className = root.ClassName }
 			end
@@ -159,7 +174,15 @@ for _, root in ipairs(game:GetChildren()) do
 end
 if #errors > 0 then
 	warn("❌ Full export stopped before sending data. Fix or rename the following unsupported paths:")
-	for i = 1, math.min(#errors, 40) do warn(errors[i]) end
+	for i = 1, math.min(#errors, 40) do
+		local item = errors[i]
+		if type(item) == "table" and item.kind == "InvalidName" then
+			warn(string.format('Rename "%s" (%s): %s. Click the instance below to locate it in Explorer.', item.instance.Name, item.instance.ClassName, item.reason))
+			warn(item.instance)
+		else
+			warn(item)
+		end
+	end
 	if #errors > 40 then warn((#errors - 40) .. " additional path errors omitted") end
 	return
 end
@@ -170,10 +193,10 @@ for _, anchor in ipairs(anchors) do orderedAnchors[#orderedAnchors + 1] = anchor
 table.sort(orderedAnchors, function(a, b) return pathKey(a.segments) < pathKey(b.segments) end)
 table.sort(roots, function(a, b) return a.name < b.name end)
 
--- Folder and anchor descendants share directory prefixes, which are expected.
--- Only two different Studio instances targeting exactly the same segment path collide.
+-- Each mapped ancestor or script must have its own path, including on
+-- Windows filesystems where names differing only by case collide.
 local function registerOwner(segments, owner)
-	local key = pathKey(segments)
+	local key = pathKey(segments):lower()
 	local previous = pathOwners[key]
 	if previous then
 		errors[#errors + 1] = {
