@@ -1,4 +1,4 @@
-local net = require("@lune/net")
+﻿local net = require("@lune/net")
 local fs = require("@lune/fs")
 local process = require("@lune/process")
 local serde = require("@lune/serde")
@@ -228,14 +228,23 @@ local function writeProjectAndManifest(complete)
 		["$ignoreUnknownInstances"] = true,
 	}
 	local function writeNodeMeta(node, segments)
-		local metadata = { ignoreUnknownInstances = true }
-		if not node.sourcePath and node.className and node.className ~= "Folder" then
-			metadata.className = node.className
-		end
-		if node.properties and next(node.properties) then metadata.properties = node.properties end
 		local directory = stagingDir .. "/src/" .. table.concat(segments, "/")
 		ensureDir(directory)
-		fs.writeFile(directory .. "/init.meta.json", serde.encode("json", metadata))
+		
+		local parts = {}
+		
+		if not node.sourcePath and node.className and node.className ~= "Folder" then
+			table.insert(parts, '"className":"' .. node.className .. '"')
+		end
+		
+		table.insert(parts, '"ignoreUnknownInstances":true')
+		
+		if node.properties and next(node.properties) then
+			table.insert(parts, '"properties":' .. serde.encode("json", node.properties))
+		end
+		
+		local jsonStr = "{" .. table.concat(parts, ",") .. "}"
+		fs.writeFile(directory .. "/init.meta.json", jsonStr)
 		for childName, child in pairs(node.children) do
 			local childSegments = table.clone(segments)
 			childSegments[#childSegments + 1] = childName
