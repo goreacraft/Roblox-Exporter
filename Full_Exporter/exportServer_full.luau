@@ -1,4 +1,4 @@
-﻿local net = require("@lune/net")
+local net = require("@lune/net")
 local fs = require("@lune/fs")
 local process = require("@lune/process")
 local serde = require("@lune/serde")
@@ -228,23 +228,65 @@ local function writeProjectAndManifest(complete)
 		["$ignoreUnknownInstances"] = true,
 	}
 	local function writeNodeMeta(node, segments)
-		local directory = stagingDir .. "/src/" .. table.concat(segments, "/")
-		ensureDir(directory)
+		local isStandaloneScript = false
+		local standalonePath = nil
+		local standaloneMetaPath = nil
+		local nodeName = segments[#segments]
 		
-		local parts = {}
+		if node.sourcePath and next(node.children) == nil then
+			isStandaloneScript = true
+			local ext = (node.className == "Script" and ".server.lua") or (node.className == "LocalScript" and ".client.lua") or ".lua"
+			
+			local parentSegments = {}
+			for i = 1, #segments - 1 do
+				table.insert(parentSegments, segments[i])
+			end
+			
+			local oldDirPath = stagingDir .. "/src/" .. table.concat(segments, "/")
+			local oldFilePath = stagingDir .. "/" .. node.sourcePath
+			
+			local newRelPath = "src/" .. table.concat(parentSegments, "/") .. "/" .. nodeName .. ext
+			standalonePath = stagingDir .. "/" .. newRelPath
+			standaloneMetaPath = stagingDir .. "/src/" .. table.concat(parentSegments, "/") .. "/" .. nodeName .. ".meta.json"
+			
+			if fs.isFile(oldFilePath) then
+				fs.move(oldFilePath, standalonePath)
+				local key = pathKey(segments)
+				if exportedScripts[key] then
+					exportedScripts[key].filePath = newRelPath
+				end
+			end
+			if fs.isDir(oldDirPath) then
+				fs.removeDir(oldDirPath)
+			end
+		end
+
+		local metaParts = {}
 		
-		if not node.sourcePath and node.className and node.className ~= "Folder" then
-			table.insert(parts, '"className":"' .. node.className .. '"')
+		if not isStandaloneScript then
+			if not node.sourcePath and node.className and node.className ~= "Folder" then
+				table.insert(metaParts, '"className":"' .. node.className .. '"')
+			end
 		end
 		
-		table.insert(parts, '"ignoreUnknownInstances":true')
+		table.insert(metaParts, '"ignoreUnknownInstances":true')
 		
 		if node.properties and next(node.properties) then
-			table.insert(parts, '"properties":' .. serde.encode("json", node.properties))
+			table.insert(metaParts, '"properties":' .. serde.encode("json", node.properties))
 		end
 		
-		local jsonStr = "{" .. table.concat(parts, ",") .. "}"
-		fs.writeFile(directory .. "/init.meta.json", jsonStr)
+		if not isStandaloneScript then
+			local directory = stagingDir .. "/src/" .. table.concat(segments, "/")
+			ensureDir(directory)
+			local jsonStr = "{" .. table.concat(metaParts, ",") .. "}"
+			fs.writeFile(directory .. "/init.meta.json", jsonStr)
+		else
+			if #metaParts > 0 then
+				local jsonStr = "{" .. table.concat(metaParts, ",") .. "}"
+				fs.writeFile(standaloneMetaPath, jsonStr)
+			end
+		end
+		
 		for childName, child in pairs(node.children) do
 			local childSegments = table.clone(segments)
 			childSegments[#childSegments + 1] = childName
