@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set "EXPORT_TARGET=..\..\Export_FTT"
+set "EXPORT_TARGET=..\Export_FTT"
 set "EXPORT_DEBUG="
 if /I "%~1"=="-debug" set "EXPORT_DEBUG=-debug"
 if not "%~1"=="" if not defined EXPORT_DEBUG (
